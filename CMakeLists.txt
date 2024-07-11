@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.1)
-project(taara-recorder LANGUAGES CXX)
+project(tum-recorder LANGUAGES CXX)
 
 # ----- Find dependencies -----
 
