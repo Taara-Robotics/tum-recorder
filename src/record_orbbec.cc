@@ -1,3 +1,5 @@
+#include <signal.h>
+
 #include <popl.hpp>
 #include <ghc/filesystem.hpp>
 #include <libobsensor/ObSensor.hpp>
@@ -7,6 +9,13 @@
 #include <opencv2/imgcodecs.hpp>
 
 namespace fs = ghc::filesystem;
+
+bool running = true;
+
+void interrupt_handler(int) {
+    std::cout << "Interrupted" << std::endl;
+    running = false;
+}
 
 int main(int argc, char* argv[]) {
     popl::OptionParser op("Allowed options");
@@ -50,6 +59,13 @@ int main(int argc, char* argv[]) {
         std::cerr << op << std::endl;
         return EXIT_FAILURE;
     }
+
+    // Register interrupt handler
+    struct sigaction sig_int_handler;
+    sig_int_handler.sa_handler = interrupt_handler;
+    sigemptyset(&sig_int_handler.sa_mask);
+    sig_int_handler.sa_flags = 0;
+    sigaction(SIGINT, &sig_int_handler, NULL);
 
     // Create output directories
     const auto config_path = fs::path(output_path->value()) / "config.yaml";
@@ -137,44 +153,116 @@ int main(int argc, char* argv[]) {
     config_file << "Preprocessing:" << std::endl;
     config_file << "  min_size: 800" << std::endl;
     config_file << "  depthmap_factor: 1000.0" << std::endl;
-    config_file << std::endl;
     config_file.close();
 
     // Initialize txt files
     fs::ofstream rgb_txt(fs::path(output_path->value()) / "rgb.txt");
     fs::ofstream depth_txt(fs::path(output_path->value()) / "depth.txt");
-    // fs::ofstream accelerometer_txt(fs::path(output_path->value()) / "accelerometer.txt");
+    fs::ofstream imu_txt(fs::path(output_path->value()) / "imu.txt");
 
     rgb_txt << "# color images" << std::endl;
-    rgb_txt << "# timestamp filename" << std::endl;
+    rgb_txt << "# timestamp [s] | filename" << std::endl;
 
     depth_txt << "# depth maps" << std::endl;
-    depth_txt << "# timestamp filename" << std::endl;
+    depth_txt << "# timestamp [s] | filename" << std::endl;
     
-    // accelerometer_txt << "# accelerometer data" << std::endl;
-    // accelerometer_txt << "# timestamp ax ay az" << std::endl;
+    imu_txt << "# accelerometer and gyroscope data" << std::endl;
+    imu_txt << "# timestamp [s] | acc_x [m/s^2] | acc_y [m/s^2] | acc_z [m/s^2] | gyro_x [rad/s] | gyro_y [rad/s] | gyro_z [rad/s]" << std::endl;
 
-    // Start recording until keyboard interrupt
-    std::cout << "Recording..." << std::endl;
+    // Queue accelerometer and gyroscope data to combine by timestamps in main thread
+    std::mutex imu_mutex;
+    std::map<uint64_t, OBAccelValue> accel_data;
+    std::map<uint64_t, OBGyroValue> gyro_data;
 
+    // Record accelerometer
+    auto accel_sensor = dev->getSensorList()->getSensor(OB_SENSOR_ACCEL);
+
+    if (accel_sensor != nullptr) {
+        auto accel_profiles = accel_sensor->getStreamProfileList();
+        auto accel_profile = accel_profiles->getProfile(OB_PROFILE_DEFAULT);
+
+        accel_sensor->start(accel_profile, [&imu_mutex, &accel_data](std::shared_ptr<ob::Frame> frame) {
+            auto timestamp = frame->timeStamp();
+            auto accel_frame = frame->as<ob::AccelFrame>();
+
+            // Add to accel data map using the mutex
+            if (accel_frame != nullptr) {
+                std::lock_guard<std::mutex> lock(imu_mutex);
+                accel_data[timestamp] = accel_frame->value();
+
+                // auto timestamp_str = std::to_string(timestamp / 1e3);
+                // auto value = accel_frame->value();
+                // accel_txt << timestamp_str << " " << value.x << " " << value.y << " " << value.z << std::endl;
+            }
+        });
+    }
+
+    // Record gyroscope
+    auto gyro_sensor = dev->getSensorList()->getSensor(OB_SENSOR_GYRO);
+
+    if (gyro_sensor) {
+        auto gyro_profiles = gyro_sensor->getStreamProfileList();
+        auto gyro_profile = gyro_profiles->getProfile(OB_PROFILE_DEFAULT);
+
+        gyro_sensor->start(gyro_profile, [&imu_mutex, &gyro_data](std::shared_ptr<ob::Frame> frame) {
+            auto timestamp = frame->timeStamp();
+            auto gyro_frame = frame->as<ob::GyroFrame>();
+
+            if (gyro_frame != nullptr) {
+                std::lock_guard<std::mutex> lock(imu_mutex);
+                gyro_data[timestamp] = gyro_frame->value();
+
+                // auto timestamp_str = std::to_string(timestamp / 1e3);
+                // auto value = gyro_frame->value();
+                // gyro_txt << timestamp_str << " " << value.x << " " << value.y << " " << value.z << std::endl;
+            }
+        });
+    }
+
+    // Record color and depth frames
     cv::Mat depth_mat(color_height->value(), color_width->value(), CV_16UC1);
 
-    while (true) {
+    while (running) {
         auto frame_set = pipe.waitForFrames(100);
 
         if (frame_set == nullptr) {
             continue;
         }
 
+        // Combine accelerometer and gyroscope data
+        {
+            std::lock_guard<std::mutex> lock(imu_mutex);
+            std::vector<uint64_t> timestamps_to_remove;
+
+            for (auto& [timestamp, accel_value] : accel_data) {
+                auto it = gyro_data.find(timestamp);
+
+                if (it != gyro_data.end()) {
+                    auto gyro_value = it->second;
+                    auto timestamp_str = std::to_string(timestamp / 1e3);
+                    imu_txt << timestamp_str << " " << accel_value.x << " " << accel_value.y << " " << accel_value.z << " " << gyro_value.x << " " << gyro_value.y << " " << gyro_value.z << std::endl;
+                    timestamps_to_remove.push_back(timestamp);
+                }
+            }
+
+            // Clear combined data
+            for (auto timestamp : timestamps_to_remove) {
+                accel_data.erase(timestamp);
+                gyro_data.erase(timestamp);
+            }
+        }
+
         // Get timestamp
-        std::chrono::system_clock::time_point now = std::chrono::system_clock::now();
-        double timestamp = std::chrono::duration_cast<std::chrono::duration<double>>(now.time_since_epoch()).count();
-        auto timestamp_str = std::to_string(timestamp);
+        // std::chrono::system_clock::time_point now = std::chrono::system_clock::now();
+        // double timestamp = std::chrono::duration_cast<std::chrono::duration<double>>(now.time_since_epoch()).count();
+        // auto timestamp_str = std::to_string(timestamp);
 
         // Write color as jpeg
         auto color_frame = frame_set->colorFrame();
 
         if (color_frame != nullptr) {
+            auto timestamp = color_frame->timeStamp();
+            auto timestamp_str = std::to_string(timestamp / 1e3);
             const auto color_path = fs::path(output_path->value()) / "rgb" / (timestamp_str + ".jpg");
             fs::ofstream color_file(color_path, std::ios::binary);
             color_file.write(reinterpret_cast<const char*>(color_frame->data()), color_frame->dataSize());
@@ -187,6 +275,8 @@ int main(int argc, char* argv[]) {
         auto depth_frame = frame_set->depthFrame();
 
         if (depth_frame != nullptr) {
+            auto timestamp = depth_frame->timeStamp();
+            auto timestamp_str = std::to_string(timestamp / 1e3);
             memcpy(depth_mat.data, depth_frame->data(), depth_frame->dataSize());
             const auto depth_path = fs::path(output_path->value()) / "depth" / (timestamp_str + ".png");
             cv::imwrite(depth_path, depth_mat);
@@ -196,12 +286,20 @@ int main(int argc, char* argv[]) {
     }
 
     // Stop
+    if (accel_sensor != nullptr) {
+        accel_sensor->stop();
+    }
+
+    if (gyro_sensor != nullptr) {
+        gyro_sensor->stop();
+    }
+
     pipe.stop();
 
     // Close txt files
     rgb_txt.close();
     depth_txt.close();
-    // accelerometer_txt.close();
+    imu_txt.close();
 
     return 0;
 }
