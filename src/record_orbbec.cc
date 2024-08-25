@@ -189,10 +189,6 @@ int main(int argc, char* argv[]) {
             if (accel_frame != nullptr) {
                 std::lock_guard<std::mutex> lock(imu_mutex);
                 accel_data[timestamp] = accel_frame->value();
-
-                // auto timestamp_str = std::to_string(timestamp / 1e3);
-                // auto value = accel_frame->value();
-                // accel_txt << timestamp_str << " " << value.x << " " << value.y << " " << value.z << std::endl;
             }
         });
     }
@@ -211,10 +207,6 @@ int main(int argc, char* argv[]) {
             if (gyro_frame != nullptr) {
                 std::lock_guard<std::mutex> lock(imu_mutex);
                 gyro_data[timestamp] = gyro_frame->value();
-
-                // auto timestamp_str = std::to_string(timestamp / 1e3);
-                // auto value = gyro_frame->value();
-                // gyro_txt << timestamp_str << " " << value.x << " " << value.y << " " << value.z << std::endl;
             }
         });
     }
@@ -251,11 +243,6 @@ int main(int argc, char* argv[]) {
                 gyro_data.erase(timestamp);
             }
         }
-
-        // Get timestamp
-        // std::chrono::system_clock::time_point now = std::chrono::system_clock::now();
-        // double timestamp = std::chrono::duration_cast<std::chrono::duration<double>>(now.time_since_epoch()).count();
-        // auto timestamp_str = std::to_string(timestamp);
 
         // Write color as jpeg
         auto color_frame = frame_set->colorFrame();
