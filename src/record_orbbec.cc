@@ -29,6 +29,7 @@ int main(int argc, char *argv[])
     auto color_height = op.add<popl::Value<unsigned int>>("", "color-height", "color image height", 960);
     auto color_fps = op.add<popl::Value<unsigned int>>("", "color-fps", "color image fps", 30);
     auto color_exposure = op.add<popl::Value<unsigned int>>("", "color-exposure", "color exposure", 100);
+    auto white_balance = op.add<popl::Value<unsigned int>>("", "white-balance", "white balance", 4000);
     auto depth_width = op.add<popl::Value<unsigned int>>("", "depth-width", "depth image width", 640);
     auto depth_height = op.add<popl::Value<unsigned int>>("", "depth-height", "depth image height", 576);
     auto depth_fps = op.add<popl::Value<unsigned int>>("", "depth-fps", "depth image fps", 30);
@@ -112,7 +113,11 @@ int main(int argc, char *argv[])
     devConfig->enableVideoStream(OB_STREAM_DEPTH, depth_width->value(), depth_height->value(), depth_fps->value(), OB_FORMAT_Y16);
     devConfig->setAlignMode(ALIGN_D2C_SW_MODE);
 
-    // set color exposure
+    // disable auto white balance
+    dev->setBoolProperty(OB_PROP_COLOR_AUTO_WHITE_BALANCE_BOOL, false);
+    dev->setIntProperty(OB_PROP_COLOR_WHITE_BALANCE_INT, white_balance->value());
+
+    // disable auto exposure
     dev->setBoolProperty(OB_PROP_COLOR_AUTO_EXPOSURE_BOOL, false);
     dev->setIntProperty(OB_PROP_COLOR_EXPOSURE_INT, color_exposure->value());
 
