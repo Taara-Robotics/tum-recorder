@@ -29,6 +29,7 @@ int main(int argc, char *argv[])
     auto color_height = op.add<popl::Value<unsigned int>>("", "color-height", "color image height", 960);
     auto color_fps = op.add<popl::Value<unsigned int>>("", "color-fps", "color image fps", 30);
     auto color_exposure = op.add<popl::Value<unsigned int>>("", "color-exposure", "color exposure", 100);
+    auto color_gain = op.add<popl::Value<unsigned int>>("", "color-gain", "color gain", 0);
     auto white_balance = op.add<popl::Value<unsigned int>>("", "white-balance", "white balance", 4000);
     auto depth_width = op.add<popl::Value<unsigned int>>("", "depth-width", "depth image width", 640);
     auto depth_height = op.add<popl::Value<unsigned int>>("", "depth-height", "depth image height", 576);
@@ -120,6 +121,9 @@ int main(int argc, char *argv[])
     // disable auto exposure
     dev->setBoolProperty(OB_PROP_COLOR_AUTO_EXPOSURE_BOOL, false);
     dev->setIntProperty(OB_PROP_COLOR_EXPOSURE_INT, color_exposure->value());
+
+    // set gain
+    dev->setIntProperty(OB_PROP_COLOR_GAIN_INT, color_gain->value());
 
     // Start the pipeline
     ob::Pipeline pipe;
