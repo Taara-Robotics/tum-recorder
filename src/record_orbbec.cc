@@ -12,12 +12,14 @@ namespace fs = ghc::filesystem;
 
 bool running = true;
 
-void interrupt_handler(int) {
+void interrupt_handler(int)
+{
     std::cout << "Interrupted" << std::endl;
     running = false;
 }
 
-int main(int argc, char* argv[]) {
+int main(int argc, char *argv[])
+{
     popl::OptionParser op("Allowed options");
     auto help = op.add<popl::Switch>("h", "help", "produce help message");
     auto device_index = op.add<popl::Value<unsigned int>>("d", "device", "device index", 0);
@@ -26,15 +28,18 @@ int main(int argc, char* argv[]) {
     auto color_width = op.add<popl::Value<unsigned int>>("", "color-width", "color image width", 1280);
     auto color_height = op.add<popl::Value<unsigned int>>("", "color-height", "color image height", 960);
     auto color_fps = op.add<popl::Value<unsigned int>>("", "color-fps", "color image fps", 30);
+    auto color_exposure = op.add<popl::Value<unsigned int>>("", "color-exposure", "color exposure", 100);
     auto depth_width = op.add<popl::Value<unsigned int>>("", "depth-width", "depth image width", 640);
     auto depth_height = op.add<popl::Value<unsigned int>>("", "depth-height", "depth image height", 576);
     auto depth_fps = op.add<popl::Value<unsigned int>>("", "depth-fps", "depth image fps", 30);
     auto depth_threshold = op.add<popl::Value<float>>("", "depth-threshold", "depth threshold", 40.0);
 
-    try {
+    try
+    {
         op.parse(argc, argv);
     }
-    catch (const std::exception& e) {
+    catch (const std::exception &e)
+    {
         std::cerr << e.what() << std::endl;
         std::cerr << std::endl;
         std::cerr << op << std::endl;
@@ -42,18 +47,22 @@ int main(int argc, char* argv[]) {
     }
 
     // check validness of options
-    if (help->is_set()) {
+    if (help->is_set())
+    {
         std::cerr << op << std::endl;
         return EXIT_FAILURE;
     }
-    if (!op.unknown_options().empty()) {
-        for (const auto& unknown_option : op.unknown_options()) {
+    if (!op.unknown_options().empty())
+    {
+        for (const auto &unknown_option : op.unknown_options())
+        {
             std::cerr << "unknown_options: " << unknown_option << std::endl;
         }
         std::cerr << op << std::endl;
         return EXIT_FAILURE;
     }
-    if (!output_path->is_set()) {
+    if (!output_path->is_set())
+    {
         std::cerr << "Error: please provide an output path" << std::endl;
         std::cerr << std::endl;
         std::cerr << op << std::endl;
@@ -71,8 +80,10 @@ int main(int argc, char* argv[]) {
     const auto config_path = fs::path(output_path->value()) / "config.yaml";
 
     // check if output directory exists
-    if (fs::exists(config_path)) {
-        if (!force->is_set()) {
+    if (fs::exists(config_path))
+    {
+        if (!force->is_set())
+        {
             std::cerr << "Error: output directory already exists" << std::endl;
             return -1;
         }
@@ -88,7 +99,8 @@ int main(int argc, char* argv[]) {
     ob::Context ctx;
     auto devList = ctx.queryDeviceList();
 
-    if(devList->deviceCount() <= device_index->value()) {
+    if (devList->deviceCount() <= device_index->value())
+    {
         std::cerr << "Device not found!" << std::endl;
         return -1;
     }
@@ -98,9 +110,13 @@ int main(int argc, char* argv[]) {
     auto devConfig = std::make_shared<ob::Config>();
     devConfig->enableVideoStream(OB_STREAM_COLOR, color_width->value(), color_height->value(), color_fps->value(), OB_FORMAT_MJPG);
     devConfig->enableVideoStream(OB_STREAM_DEPTH, depth_width->value(), depth_height->value(), depth_fps->value(), OB_FORMAT_Y16);
-    // devConfig->enableAccelStream();
     devConfig->setAlignMode(ALIGN_D2C_SW_MODE);
 
+    // set color exposure
+    dev->setBoolProperty(OB_PROP_COLOR_AUTO_EXPOSURE_BOOL, false);
+    dev->setIntProperty(OB_PROP_COLOR_EXPOSURE_INT, color_exposure->value());
+
+    // Start the pipeline
     ob::Pipeline pipe;
     pipe.enableFrameSync();
     pipe.start(devConfig);
@@ -108,51 +124,52 @@ int main(int argc, char* argv[]) {
     // Get depth range based on depth resolution
     float depth_range_max;
 
-    switch (depth_width->value()) {
-        default:
-            depth_range_max = 2.21;
-            break;
-        case 512:
-            depth_range_max = 2.88;
-            break;
-        case 640:
-            depth_range_max = 3.86;
-            break;
-        case 320:
-            depth_range_max = 5.46;
-            break;
+    switch (depth_width->value())
+    {
+    default:
+        depth_range_max = 2.21;
+        break;
+    case 512:
+        depth_range_max = 2.88;
+        break;
+    case 640:
+        depth_range_max = 3.86;
+        break;
+    case 320:
+        depth_range_max = 5.46;
+        break;
     }
 
     // write vslam config
     auto params = pipe.getCameraParam();
     fs::ofstream config_file(config_path);
-    config_file << "Camera:" << std::endl;
-    config_file << "  name: \"Orbbec\"" << std::endl;
-    config_file << "  setup: \"RGBD\"" << std::endl;
-    config_file << "  model: \"perspective\"" << std::endl;
-    config_file << std::endl;
-    config_file << "  fx: " << params.rgbIntrinsic.fx << std::endl;
-    config_file << "  fy: " << params.rgbIntrinsic.fy << std::endl;
-    config_file << "  cx: " << params.rgbIntrinsic.cx << std::endl;
-    config_file << "  cy: " << params.rgbIntrinsic.cy << std::endl;
-    config_file << std::endl;
-    config_file << "  k1: " << params.rgbDistortion.k1 << std::endl;
-    config_file << "  k2: " << params.rgbDistortion.k2 << std::endl;
-    config_file << "  p1: " << params.rgbDistortion.p1 << std::endl;
-    config_file << "  p2: " << params.rgbDistortion.p2 << std::endl;
-    config_file << "  k3: " << params.rgbDistortion.k3 << std::endl;
-    config_file << std::endl;
-    config_file << "  fps: " << color_fps->value() << std::endl;
-    config_file << "  cols: " << color_width->value() << std::endl;
-    config_file << "  rows: " << color_height->value() << std::endl;
-    config_file << "  color_order: \"RGB\"" << std::endl;
-    config_file << std::endl;
-    config_file << "  focal_x_baseline: " << (depth_range_max/depth_threshold->value()*params.rgbIntrinsic.fx) << std::endl;
-    config_file << "  depth_threshold: " << depth_threshold->value() << std::endl;
-    config_file << std::endl;
-    config_file << "Preprocessing:" << std::endl;
-    config_file << "  min_size: 800" << std::endl;
-    config_file << "  depthmap_factor: 1000.0" << std::endl;
+    config_file << "Camera:\n";
+    config_file << "  name: \"Orbbec\"\n";
+    config_file << "  setup: \"RGBD\"\n";
+    config_file << "  model: \"perspective\"\n";
+    config_file << "\n";
+    config_file << "  fx: " << params.rgbIntrinsic.fx << "\n";
+    config_file << "  fy: " << params.rgbIntrinsic.fy << "\n";
+    config_file << "  cx: " << params.rgbIntrinsic.cx << "\n";
+    config_file << "  cy: " << params.rgbIntrinsic.cy << "\n";
+    config_file << "\n";
+    config_file << "  k1: " << params.rgbDistortion.k1 << "\n";
+    config_file << "  k2: " << params.rgbDistortion.k2 << "\n";
+    config_file << "  p1: " << params.rgbDistortion.p1 << "\n";
+    config_file << "  p2: " << params.rgbDistortion.p2 << "\n";
+    config_file << "  k3: " << params.rgbDistortion.k3 << "\n";
+    config_file << "\n";
+    config_file << "  fps: " << color_fps->value() << "\n";
+    config_file << "  cols: " << color_width->value() << "\n";
+    config_file << "  rows: " << color_height->value() << "\n";
+    config_file << "  color_order: \"RGB\"\n";
+    config_file << "\n";
+    config_file << "  focal_x_baseline: " << (depth_range_max / depth_threshold->value() * params.rgbIntrinsic.fx) << "\n";
+    config_file << "  depth_threshold: " << depth_threshold->value() << "\n";
+    config_file << "\n";
+    config_file << "Preprocessing:\n";
+    config_file << "  min_size: 800\n";
+    config_file << "  depthmap_factor: 1000.0\n";
     config_file.close();
 
     // Initialize txt files
@@ -165,7 +182,7 @@ int main(int argc, char* argv[]) {
 
     depth_txt << "# depth maps" << std::endl;
     depth_txt << "# timestamp [s] | filename" << std::endl;
-    
+
     imu_txt << "# accelerometer and gyroscope data" << std::endl;
     imu_txt << "# timestamp [s] | acc_x [m/s^2] | acc_y [m/s^2] | acc_z [m/s^2] | gyro_x [rad/s] | gyro_y [rad/s] | gyro_z [rad/s]" << std::endl;
 
@@ -177,11 +194,13 @@ int main(int argc, char* argv[]) {
     // Record accelerometer
     auto accel_sensor = dev->getSensorList()->getSensor(OB_SENSOR_ACCEL);
 
-    if (accel_sensor != nullptr) {
+    if (accel_sensor != nullptr)
+    {
         auto accel_profiles = accel_sensor->getStreamProfileList();
         auto accel_profile = accel_profiles->getProfile(OB_PROFILE_DEFAULT);
 
-        accel_sensor->start(accel_profile, [&imu_mutex, &accel_data](std::shared_ptr<ob::Frame> frame) {
+        accel_sensor->start(accel_profile, [&imu_mutex, &accel_data](std::shared_ptr<ob::Frame> frame)
+                            {
             auto timestamp = frame->timeStamp();
             auto accel_frame = frame->as<ob::AccelFrame>();
 
@@ -189,35 +208,37 @@ int main(int argc, char* argv[]) {
             if (accel_frame != nullptr) {
                 std::lock_guard<std::mutex> lock(imu_mutex);
                 accel_data[timestamp] = accel_frame->value();
-            }
-        });
+            } });
     }
 
     // Record gyroscope
     auto gyro_sensor = dev->getSensorList()->getSensor(OB_SENSOR_GYRO);
 
-    if (gyro_sensor) {
+    if (gyro_sensor)
+    {
         auto gyro_profiles = gyro_sensor->getStreamProfileList();
         auto gyro_profile = gyro_profiles->getProfile(OB_PROFILE_DEFAULT);
 
-        gyro_sensor->start(gyro_profile, [&imu_mutex, &gyro_data](std::shared_ptr<ob::Frame> frame) {
+        gyro_sensor->start(gyro_profile, [&imu_mutex, &gyro_data](std::shared_ptr<ob::Frame> frame)
+                           {
             auto timestamp = frame->timeStamp();
             auto gyro_frame = frame->as<ob::GyroFrame>();
 
             if (gyro_frame != nullptr) {
                 std::lock_guard<std::mutex> lock(imu_mutex);
                 gyro_data[timestamp] = gyro_frame->value();
-            }
-        });
+            } });
     }
 
     // Record color and depth frames
     cv::Mat depth_mat(color_height->value(), color_width->value(), CV_16UC1);
 
-    while (running) {
+    while (running)
+    {
         auto frame_set = pipe.waitForFrames(100);
 
-        if (frame_set == nullptr) {
+        if (frame_set == nullptr)
+        {
             continue;
         }
 
@@ -226,10 +247,12 @@ int main(int argc, char* argv[]) {
             std::lock_guard<std::mutex> lock(imu_mutex);
             std::vector<uint64_t> timestamps_to_remove;
 
-            for (auto& [timestamp, accel_value] : accel_data) {
+            for (auto &[timestamp, accel_value] : accel_data)
+            {
                 auto it = gyro_data.find(timestamp);
 
-                if (it != gyro_data.end()) {
+                if (it != gyro_data.end())
+                {
                     auto gyro_value = it->second;
                     auto timestamp_str = std::to_string(timestamp / 1e3);
                     imu_txt << timestamp_str << " " << accel_value.x << " " << accel_value.y << " " << accel_value.z << " " << gyro_value.x << " " << gyro_value.y << " " << gyro_value.z << std::endl;
@@ -238,7 +261,8 @@ int main(int argc, char* argv[]) {
             }
 
             // Clear combined data
-            for (auto timestamp : timestamps_to_remove) {
+            for (auto timestamp : timestamps_to_remove)
+            {
                 accel_data.erase(timestamp);
                 gyro_data.erase(timestamp);
             }
@@ -247,12 +271,13 @@ int main(int argc, char* argv[]) {
         // Write color as jpeg
         auto color_frame = frame_set->colorFrame();
 
-        if (color_frame != nullptr) {
+        if (color_frame != nullptr)
+        {
             auto timestamp = color_frame->timeStamp();
             auto timestamp_str = std::to_string(timestamp / 1e3);
             const auto color_path = fs::path(output_path->value()) / "rgb" / (timestamp_str + ".jpg");
             fs::ofstream color_file(color_path, std::ios::binary);
-            color_file.write(reinterpret_cast<const char*>(color_frame->data()), color_frame->dataSize());
+            color_file.write(reinterpret_cast<const char *>(color_frame->data()), color_frame->dataSize());
             color_file.close();
 
             rgb_txt << timestamp_str << " rgb/" << color_path.filename().string() << std::endl;
@@ -261,7 +286,8 @@ int main(int argc, char* argv[]) {
         // Write depth as png
         auto depth_frame = frame_set->depthFrame();
 
-        if (depth_frame != nullptr) {
+        if (depth_frame != nullptr)
+        {
             auto timestamp = depth_frame->timeStamp();
             auto timestamp_str = std::to_string(timestamp / 1e3);
             memcpy(depth_mat.data, depth_frame->data(), depth_frame->dataSize());
@@ -273,11 +299,13 @@ int main(int argc, char* argv[]) {
     }
 
     // Stop
-    if (accel_sensor != nullptr) {
+    if (accel_sensor != nullptr)
+    {
         accel_sensor->stop();
     }
 
-    if (gyro_sensor != nullptr) {
+    if (gyro_sensor != nullptr)
+    {
         gyro_sensor->stop();
     }
 
