@@ -33,8 +33,8 @@ foreach(EXECUTABLE_TARGET IN LISTS EXECUTABLE_TARGETS)
                           RUNTIME_OUTPUT_DIRECTORY_MINSIZEREL "${PROJECT_BINARY_DIR}"
                           RUNTIME_OUTPUT_DIRECTORY_RELWITHDEBINFO "${PROJECT_BINARY_DIR}")
 
-    # Link OpenCV
-    target_link_libraries(${EXECUTABLE_TARGET} PRIVATE opencv_imgcodecs)
+    # Link OpenCV (for waitKey)
+    target_link_libraries(${EXECUTABLE_TARGET} PRIVATE opencv_core opencv_imgproc opencv_imgcodecs opencv_highgui)
 
     # include 3rd party library headers
     target_include_directories(${EXECUTABLE_TARGET}
